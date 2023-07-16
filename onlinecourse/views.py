@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.http import HttpResponseRedirect
 # <HINT> Import any new Models here
-from .models import Course, Enrollment
+from .models import Course, Enrollment, Question,Choice,Submission
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
@@ -65,6 +65,7 @@ def check_if_enrolled(user, course):
     if user.id is not None:
         # Check if user enrolled
         num_results = Enrollment.objects.filter(user=user, course=course).count()
+        
         if num_results > 0:
             is_enrolled = True
     return is_enrolled
@@ -102,6 +103,99 @@ def enroll(request, course_id):
 
     return HttpResponseRedirect(reverse(viewname='onlinecourse:course_details', args=(course.id,)))
 
+
+def submit(request, course_id):
+    # Get the current user and the course object
+    user = request.user
+    course = Course.objects.get(id=course_id)
+
+    # Get the associated enrollment object
+    enrollment = Enrollment.objects.get(user=user, course=course)
+
+    # Create a new submission object referring to the enrollment
+    submission = Submission.objects.create(enrollment=enrollment)
+    
+
+    # Collect the selected choices from the HTTP request
+    selected_choices = []
+    for key, value in request.POST.items():
+        if key.startswith('choice_') and value == 'on':
+            choice_id = key.replace('choice_', '')
+            selected_choices.append(int(choice_id))
+
+    # Add each selected choice object to the submission
+    choices = Choice.objects.filter(id__in=selected_choices)
+    submission.choices.set(choices)
+
+    # Redirect to the show_exam_result view with the submission id
+    return redirect('onlinecourse:show_exam_result', course_id=course.id, submission_id=submission.id)
+
+# def show_exam_result(request, course_id, submission_id):
+#     # Get the course object and submission object based on their ids
+#     course = get_object_or_404(Course, id=course_id)
+#     submission = get_object_or_404(Submission, id=submission_id)
+    
+#     # Get the selected choice ids from the submission record
+#     selected_choice_ids = submission.choices.values_list('id', flat=True)
+
+#     # Calculate the total score by adding up the grades for all questions in the course
+#     total_score = 0
+#     for question in course.question_set.all():
+#         if question.is_get_score(selected_choice_ids):
+#             total_score += question.grade_point
+#     age = course.question_set.all().count()
+#     # Prepare the context for rendering the HTML page
+#     context = {
+#         'course': course,
+#         'selected_choice_ids': selected_choice_ids,
+#         'grade': total_score,
+#         'age':100//age*total_score,
+        
+    
+#     }
+
+#     # Render the HTML page with the context
+#     return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
+
+def show_exam_result(request, course_id, submission_id):
+    # ...
+    course = get_object_or_404(Course, id=course_id)
+    submission = get_object_or_404(Submission, id=submission_id)
+    
+    # Get the selected choice ids from the submission record
+    selected_choice_ids = submission.choices.values_list('id', flat=True)
+    total_score = 0
+    correct_answers = []
+
+    for question in course.question_set.all():
+        selected_choices = submission.choices.filter(question=question)
+        selected_choice_ids = selected_choices.values_list('id', flat=True)
+
+        if question.is_get_score(selected_choice_ids):
+            total_score += question.grade_point
+            correct_answers.append({
+                'question': question,
+                'choices': selected_choices.filter(is_correct=True),
+                'is_correct': True
+            })
+        else:
+            correct_answers.append({
+                'question': question,
+                'choices': selected_choices,
+                'is_correct': False
+            })
+    age = course.question_set.all().count()
+    context = {
+        'course': course,
+        'selected_choice_ids': selected_choice_ids,
+        'grade': total_score,
+        'correct_answers': correct_answers,
+        'total_questions': course.question_set.count(),
+        'age':100//age*total_score,
+
+    }
+
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
 
 # <HINT> Create a submit view to create an exam submission record for a course enrollment,
 # you may implement it based on following logic:
